@@ -28,7 +28,8 @@ jobs:
             LATEST_ORT="${{ github.event.inputs.ort_version }}"
           fi
           
-          # Get latest release from current repo (to avoid rebuilding same version)
+          # Get latest release from current repo
+          # Note: If no releases exist, this might fail or return null. Handle it.
           CURRENT_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name || echo "none")
           
           echo "Latest ORT available: $LATEST_ORT"
@@ -58,18 +59,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-          cache: 'pip'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install openvino-telemetry numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs wheel
+          pip install wheel numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs
 
       - name: Build Windows Wheel
+        shell: pwsh
         run: |
-          # Set OpenVINO path for cmake
-          $env:OpenVINO_DIR = "$(python -c 'import openvino; import os; print(os.path.join(os.path.dirname(openvino.__file__), \"cmake\"))')"
-          $env:PATH = "$(python -c 'import openvino; import os; print(os.path.join(os.path.dirname(openvino.__file__), \"libs\"))');" + $env:PATH
+          # Logic from run_build.py
+          $ov_path = python -c "import openvino; import os; print(os.path.dirname(openvino.__file__))"
+          $env:OpenVINO_DIR = Join-Path $ov_path "cmake"
+          $env:PATH = "$(Join-Path $ov_path "libs");" + $env:PATH
           
           python onnxruntime/tools/ci_build/build.py `
             --build_dir build `
@@ -78,7 +80,6 @@ jobs:
             --use_openvino CPU `
             --use_dml `
             --parallel `
-            --skip_pip_install `
             --skip_tests `
             --compile_no_warning_as_error
 
@@ -105,16 +106,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-          cache: 'pip'
 
       - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs wheel
+          python3 -m pip install --upgrade pip
+          pip3 install wheel numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
 
       - name: Build Linux Wheel
         run: |
-          # Set OpenVINO path for cmake
+          # Logic from run_build.py adapted for Linux
           export OpenVINO_DIR=$(python3 -c "import openvino; import os; print(os.path.join(os.path.dirname(openvino.__file__), 'cmake'))")
           
           python3 onnxruntime/tools/ci_build/build.py \
@@ -123,7 +123,6 @@ jobs:
             --build_wheel \
             --use_openvino CPU \
             --parallel \
-            --skip_pip_install \
             --skip_tests \
             --compile_no_warning_as_error
 
@@ -137,6 +136,8 @@ jobs:
     needs: [check_version, build_windows, build_linux]
     if: needs.check_version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download Windows Wheel
         uses: actions/download-artifact@v4
