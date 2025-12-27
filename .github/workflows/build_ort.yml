@@ -77,6 +77,7 @@ jobs:
             --build_dir build `
             --config Release `
             --build_wheel `
+            --build_shared_lib `
             --use_openvino CPU `
             --use_dml `
             --parallel `
@@ -111,6 +112,18 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip3 install wheel numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
+          # Install build dependencies
+          sudo apt-get update
+          sudo apt-get install -y libtbb-dev libssl-dev libopenblas-dev libpng-dev libjpeg-dev libsecret-1-dev
+
+      - name: Maximize Build Space (Increase Swap)
+        run: |
+          # Increasing swap to 4G to avoid OOM
+          sudo swapoff -a
+          sudo fallocate -l 4G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
 
       - name: Build Linux Wheel
         run: |
@@ -121,8 +134,9 @@ jobs:
             --build_dir build \
             --config Release \
             --build_wheel \
+            --build_shared_lib \
             --use_openvino CPU \
-            --parallel \
+            --parallel 1 \
             --skip_tests \
             --compile_no_warning_as_error
 
