@@ -22,19 +22,19 @@ jobs:
         run: |
           # Get latest release from microsoft/onnxruntime
           LATEST_ORT=$(curl -s https://api.github.com/repos/microsoft/onnxruntime/releases/latest | jq -r .tag_name)
-          
+
           # If manual version provided, use it
           if [ "${{ github.event.inputs.ort_version }}" != "" ]; then
             LATEST_ORT="${{ github.event.inputs.ort_version }}"
           fi
-          
+
           # Get latest release from current repo
           # Note: If no releases exist, this might fail or return null. Handle it.
           CURRENT_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name || echo "none")
-          
+
           echo "Latest ORT available: $LATEST_ORT"
           echo "Current repository release: $CURRENT_RELEASE"
-          
+
           if [ "$LATEST_ORT" != "$CURRENT_RELEASE" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "ort_version=$LATEST_ORT" >> $GITHUB_OUTPUT
@@ -47,8 +47,11 @@ jobs:
     if: needs.check_version.outputs.should_build == 'true'
     runs-on: windows-2022
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.13', '3.14']
+        freethreaded: [false, true]
+    continue-on-error: ${{ matrix.freethreaded }}
     steps:
       - name: Checkout ORT
         uses: actions/checkout@v4
@@ -62,11 +65,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          freethreaded: ${{ matrix.freethreaded }}
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install wheel numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs
+          pip install wheel numpy==2.3.5 openvino==2026.1.0 flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs
 
       - name: Build Windows Wheel
         shell: pwsh
@@ -75,13 +79,13 @@ jobs:
           $ov_path = python -c "import openvino; import os; print(os.path.dirname(openvino.__file__))"
           $env:OpenVINO_DIR = Join-Path $ov_path "cmake"
           $env:PATH = "$(Join-Path $ov_path "libs");" + $env:PATH
-          
+
           python onnxruntime/tools/ci_build/build.py `
             --build_dir build `
             --config Release `
             --build_wheel `
             --build_shared_lib `
-            --use_openvino CPU `
+            --use_openvino AUTO `
             --use_dml `
             --parallel `
             --skip_tests `
@@ -90,14 +94,29 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onnxruntime-windows-${{ matrix.python-version }}-wheel
+          name: onnxruntime-windows-${{ matrix.python-version }}${{ matrix.freethreaded && 't' || '' }}-wheel
           path: build/Release/Release/dist/*.whl
+          if-no-files-found: warn
 
   build_linux:
     needs: check_version
     if: needs.check_version.outputs.should_build == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+        freethreaded: [false, true]
+    continue-on-error: ${{ matrix.freethreaded }}
+    container:
+      image: rocm/dev-ubuntu-22.04:latest
+      options: --user root
     steps:
+      - name: Install System Dependencies
+        run: |
+          apt-get update
+          apt-get install -y git cmake protobuf-compiler libprotobuf-dev curl ca-certificates software-properties-common build-essential
+
       - name: Checkout ORT
         uses: actions/checkout@v4
         with:
@@ -109,37 +128,29 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python-version }}
+          freethreaded: ${{ matrix.freethreaded }}
 
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-13 g++-13 libtbb-dev libssl-dev libopenblas-dev libpng-dev libjpeg-dev libsecret-1-dev
-          python3 -m pip install --upgrade pip
-          pip3 install wheel numpy==2.3.5 openvino==2025.4.1 flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
+          python -m pip install --upgrade pip
+          pip install wheel numpy==2.3.5 openvino==2026.1.0 flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
 
-      - name: Maximize Build Space (Increase Swap)
+      - name: Build Linux Wheel (MIGraphX + OpenVINO)
         run: |
-          # Increasing swap to 4G to avoid OOM
-          sudo swapoff -a
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # Logic from run_build.py adapted for Linux/ROCm
+          export CC=gcc
+          export CXX=g++
+          export OpenVINO_DIR=$(python -c "import openvino; import os; print(os.path.join(os.path.dirname(openvino.__file__), 'cmake'))")
 
-      - name: Build Linux Wheel
-        run: |
-          # Logic from run_build.py adapted for Linux
-          export CC=gcc-13
-          export CXX=g++-13
-          export OpenVINO_DIR=$(python3 -c "import openvino; import os; print(os.path.join(os.path.dirname(openvino.__file__), 'cmake'))")
-          
-          python3 onnxruntime/tools/ci_build/build.py \
+          python onnxruntime/tools/ci_build/build.py \
             --build_dir build \
             --config Release \
             --build_wheel \
             --build_shared_lib \
-            --use_openvino CPU \
+            --use_openvino AUTO \
+            --use_migraphx \
+            --migraphx_home /opt/rocm \
             --parallel 1 \
             --skip_tests \
             --compile_no_warning_as_error
@@ -147,33 +158,26 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onnxruntime-linux-wheel
+          name: onnxruntime-linux-${{ matrix.python-version }}${{ matrix.freethreaded && 't' || '' }}-wheel
           path: build/Release/dist/*.whl
+          if-no-files-found: warn
 
   create_release:
     needs: [check_version, build_windows, build_linux]
-    if: needs.check_version.outputs.should_build == 'true'
+    if: ${{ always() && needs.check_version.outputs.should_build == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download Windows 3.13 Wheel
+      - name: Download All Wheels
         uses: actions/download-artifact@v4
         with:
-          name: onnxruntime-windows-3.13-wheel
+          pattern: onnxruntime-*-wheel
           path: dist
+          merge-multiple: true
 
-      - name: Download Windows 3.14 Wheel
-        uses: actions/download-artifact@v4
-        with:
-          name: onnxruntime-windows-3.14-wheel
-          path: dist
-
-      - name: Download Linux Wheel
-        uses: actions/download-artifact@v4
-        with:
-          name: onnxruntime-linux-wheel
-          path: dist
+      - name: List Wheels
+        run: ls -la dist || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -183,8 +187,8 @@ jobs:
           files: dist/*.whl
           body: |
             Automated build of ONNX Runtime with dual Execution Providers.
-            - **Windows**: OpenVINO + DirectML (Python 3.13, 3.14)
-            - **Linux**: OpenVINO (Python 3.13)
-            - **Python Support**: 3.13, 3.14
+            - **Windows**: OpenVINO + DirectML (Python 3.13, 3.13t, 3.14, 3.14t)
+            - **Linux**: OpenVINO + MIGraphX (Python 3.13, 3.13t, 3.14, 3.14t)
+            - **Free-threaded builds** (3.13t / 3.14t) are best-effort and may be missing if openvino lacks free-threaded wheels.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
