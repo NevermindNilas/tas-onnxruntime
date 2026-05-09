@@ -67,7 +67,7 @@ jobs:
       - name: Install Dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools
           pip install wheel "numpy==2.3.5" "openvino==2026.1.0" flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs
 
       - name: Build Windows Wheel
@@ -132,7 +132,7 @@ jobs:
 
       - name: Install Python Dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools
           pip install wheel "numpy==2.3.5" "openvino==2026.1.0" flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
 
       - name: Build Linux Wheel (MIGraphX + OpenVINO)
