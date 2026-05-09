@@ -180,7 +180,8 @@ jobs:
             --migraphx_home /opt/rocm \
             --parallel 1 \
             --skip_tests \
-            --compile_no_warning_as_error
+            --compile_no_warning_as_error \
+            --allow_running_as_root
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
