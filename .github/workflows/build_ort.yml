@@ -137,6 +137,10 @@ jobs:
         run: |
           apt-get update
           apt-get install -y git cmake protobuf-compiler libprotobuf-dev curl ca-certificates software-properties-common build-essential
+          # MIGraphX dev package ships migraphxConfig.cmake under /opt/rocm/lib/cmake.
+          # Try the common package names; ROCm renamed it across versions.
+          apt-get install -y migraphx-dev || apt-get install -y migraphx || apt-get install -y rocm-migraphx || true
+          ls /opt/rocm/lib/cmake/migraphx 2>/dev/null || echo "warning: migraphx cmake config not found, build will fail"
 
       - name: Checkout ORT
         uses: actions/checkout@v4
