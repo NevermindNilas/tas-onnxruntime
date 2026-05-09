@@ -49,16 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: '3.13'
-            freethreaded: false
-          - python-version: '3.14'
-            freethreaded: false
-          - python-version: '3.13'
-            freethreaded: true
-          - python-version: '3.14'
-            freethreaded: true
-    continue-on-error: ${{ matrix.freethreaded }}
+        python-version: ['3.13', '3.14']
     steps:
       - name: Checkout ORT
         uses: actions/checkout@v4
@@ -72,19 +63,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          freethreaded: ${{ matrix.freethreaded }}
 
       - name: Install Dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          # Try pinned openvino first, fall back to latest available (free-threaded
-          # variants may not have an openvino wheel for the pinned version).
-          pip install wheel "numpy==2.3.5" flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs
-          if (-not (pip install "openvino==2026.1.0")) {
-            Write-Host "Pinned openvino==2026.1.0 unavailable for this Python; trying latest."
-            pip install openvino
-          }
+          pip install wheel "numpy==2.3.5" "openvino==2026.1.0" flatbuffers packaging protobuf sympy mpmath humanfriendly pyreadline3 coloredlogs
 
       - name: Build Windows Wheel
         shell: pwsh
@@ -108,7 +92,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onnxruntime-windows-${{ matrix.python-version }}${{ matrix.freethreaded && 't' || '' }}-wheel
+          name: onnxruntime-windows-${{ matrix.python-version }}-wheel
           path: build/Release/Release/dist/*.whl
           if-no-files-found: warn
 
@@ -119,16 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: '3.13'
-            freethreaded: false
-          - python-version: '3.14'
-            freethreaded: false
-          - python-version: '3.13'
-            freethreaded: true
-          - python-version: '3.14'
-            freethreaded: true
-    continue-on-error: ${{ matrix.freethreaded }}
+        python-version: ['3.13', '3.14']
     container:
       image: rocm/dev-ubuntu-24.04:latest
       options: --user root
@@ -154,18 +129,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          freethreaded: ${{ matrix.freethreaded }}
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install wheel "numpy==2.3.5" flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
-          # Free-threaded variants of openvino may not exist for the pinned version.
-          # Try pinned, fall back to latest, otherwise skip (build step will fail loudly).
-          if ! pip install "openvino==2026.1.0"; then
-            echo "Pinned openvino==2026.1.0 unavailable for this Python; trying latest."
-            pip install openvino || echo "No openvino wheel available for this Python."
-          fi
+          pip install wheel "numpy==2.3.5" "openvino==2026.1.0" flatbuffers packaging protobuf sympy mpmath humanfriendly coloredlogs
 
       - name: Build Linux Wheel (MIGraphX + OpenVINO)
         run: |
@@ -190,7 +158,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onnxruntime-linux-${{ matrix.python-version }}${{ matrix.freethreaded && 't' || '' }}-wheel
+          name: onnxruntime-linux-${{ matrix.python-version }}-wheel
           path: build/Release/dist/*.whl
           if-no-files-found: warn
 
@@ -219,11 +187,9 @@ jobs:
           files: dist/*.whl
           body: |
             Automated build of ONNX Runtime with dual Execution Providers.
-            - **Windows**: OpenVINO + DirectML (Python 3.13, 3.14; freethreaded best-effort)
-            - **Linux**: OpenVINO + MIGraphX (Python 3.13, 3.14; freethreaded best-effort)
+            - **Windows**: OpenVINO + DirectML (Python 3.13, 3.14)
+            - **Linux**: OpenVINO + MIGraphX (Python 3.13, 3.14)
             - OpenVINO EP built with default device GPU; runtime can override via
               `device_type` provider option (CPU/GPU/NPU/AUTO/HETERO/MULTI).
-            - Free-threaded (3.13t/3.14t) wheels only produced if upstream openvino
-              ships a matching free-threaded wheel.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
